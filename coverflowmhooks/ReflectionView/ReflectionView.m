@@ -40,7 +40,7 @@
 #endif
 
 
-#pragma GCC diagnostic ignored "-Wreceiver-is-weak"
+//#pragma GCC diagnostic ignored "-Wreceiver-is-weak"
 #pragma GCC diagnostic ignored "-Warc-repeated-use-of-weak"
 #pragma GCC diagnostic ignored "-Wobjc-missing-property-synthesis"
 #pragma GCC diagnostic ignored "-Wdirect-ivar-access"
@@ -48,6 +48,7 @@
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
 #pragma GCC diagnostic ignored "-Wgnu"
+
 
 
 @interface ReflectionView ()

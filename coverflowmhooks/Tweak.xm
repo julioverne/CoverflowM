@@ -1,169 +1,35 @@
-#import <dlfcn.h>
-#import <objc/runtime.h>
-#import <substrate.h>
-#import <notify.h>
-
-#import "iCarousel/iCarousel.h"
-
 #import "Tweak.h"
 
-#import "ReflectionView/ReflectionView.h"
 #include "ReflectionView/ReflectionView.m"
-
-#import "MDAudioPlayerTableViewCell/MDAudioPlayerTableViewCell.h"
 #include "MDAudioPlayerTableViewCell/MDAudioPlayerTableViewCell.m"
 
-
-#define NSLog(...)
-#define PLIST_PATH_Settings "/var/mobile/Library/Preferences/com.julioverne.coverflowm.plist"
-
+#define NSLog1(...)
 
 
 static BOOL Enabled;
 static int styleEnabled;
-
 static float kScreenW;
 static float kScreenH;
 
+static CPDistributedMessagingCenter *centerMusic = nil;
 
+static __strong NSArray* items;
 
-@interface MPMediaQuery : NSObject
-- (NSArray*)items;
-+ (id)albumsQuery;
-- (NSArray*)collections;
-@end
-@interface MPMediaItem : NSObject
-- (id)valueForProperty:(id)arg1;
-- (id)imageWithSize:(CGSize)arg1;
-
-@end
-
-@interface MPMusicPlayerController : NSObject
-+(id)iPodMusicPlayer;
-+(id)applicationMusicPlayer;
--(void)setQueueWithItemCollection:(id)arg1;
--(void)setNowPlayingItem:(id)arg1;
--(void)prepareToPlay;
--(void)play;
-@end
-
-@interface MPMediaItemCollection : NSObject
-- (MPMediaItem*)representativeItem;
-- (id)initWithItems:(id)arg1;
-- (NSArray*)items;
-@end
-
-static __strong MPMusicPlayerController* MPcontroller = [MPMusicPlayerController iPodMusicPlayer];
-static __strong NSArray* items = [[MPMediaQuery albumsQuery] collections]?:@[];
-
-@interface ColectionHViewController : UIViewController <UICollectionViewDelegate, UICollectionViewDataSource>
-@property (nonatomic, strong) UICollectionView *collectionView;
-@property (assign) int collectionIndex;
-@property (assign) int rowsCount;
-@property (assign) BOOL isShowingAlbumInfo;
-@property (nonatomic, strong) NSIndexPath* isShowingAlbumInfoIndexPath;
-@end
-
-
-@interface UINavigationBar ()
-@property (nonatomic, strong) NSString *prompt;
--(void)_setBackgroundView:(id)a;
-@end
-
-@protocol MPUTransportControlsViewDelegate <NSObject>
-@optional
--(void)transportControlsView:(id)arg1 tapOnControlType:(long long)arg2;
--(void)transportControlsView:(id)arg1 longPressBeginOnControlType:(long long)arg2;
--(void)transportControlsView:(id)arg1 longPressEndOnControlType:(long long)arg2;
--(double)transportControlsView:(id)arg1 transportButtonUnhighlightAnimationDurationForControlType:(long long)arg2;
-@end
-
-
-@protocol MPUTransportControlsViewDataSource <NSObject>
-@required
--(id)transportControlsView:(id)arg1 buttonForControlType:(long long)arg2;
-
-@end
-
-@interface MPUTransportControlsView : UIView
-@property (nonatomic) id < MPUTransportControlsViewDelegate> delegate;
-+ (id)defaultTransportControls;
-@end
-
-@interface MPUSystemMediaControlsView : UIView
-@property (nonatomic) MPUTransportControlsView* transportControlsView;
-
-@end
-
-@interface MPUSystemMediaControlsViewController : UIViewController
+static void playItem(int action, int collectionIndex, int soundIndex)
 {
-	MPUSystemMediaControlsView* _mediaControlsView;
+	[centerMusic sendMessageName:@"actionPlayer" userInfo:@{
+		@"action":@(action),
+		@"collectionIndex":@(collectionIndex),
+		@"soundIndex":@(soundIndex),
+	}];
 }
--(id)initWithStyle:(long long)arg1 ;
-@end
 
-
-
-@interface CoverflowMViewController : UIViewController <iCarouselDataSource, iCarouselDelegate, UITableViewDelegate, UITableViewDataSource>
-@property (nonatomic, strong) iCarousel* carousel;
-@property (nonatomic, strong) UILabel *titleName;
-@property (nonatomic, strong) UILabel *artist;
-@property (nonatomic, strong) UILabel *album;
-@property (nonatomic, strong) UITableView* albumTableView;
-@property (assign) int collectionIndex;
-@property (nonatomic, strong) ColectionHViewController* collectionScroll;
-+ (id)sharedInstance;
-- (void)updateData;
-@end
-
-@interface CollectionTableAViewController : UITableViewController <UITableViewDelegate, UITableViewDataSource, MPUTransportControlsViewDelegate>
-@property (assign) int indexRow;
-- (void)updateData;
-@end
-
-@interface MusicSongCell : UIView
-@property (nonatomic, strong) NSString *title;
-@property (nonatomic, strong) NSString *accessibilityDurationString;
-@property (nonatomic, strong) NSString *accessibilityTrackNumberString;
-@property (assign) BOOL wantsNowPlayingIndicator;
-@property (assign) BOOL isExplicit;
-@property (assign) NSInteger playbackState;
-@property (assign) CGFloat duration;
-@end
-
-@interface CoverflowM : NSObject
-{
-	UIView* springboardWindow;
-	CoverflowMViewController *controller;
-}
-@property (nonatomic, strong) UIView* springboardWindow;
-@property (nonatomic, strong) CoverflowMViewController *controller;
-+ (id)sharedInstance;
-+ (BOOL)sharedInstanceExist;
-+ (void)notifyOrientationChange;
-- (void)firstload;
-- (void)orientationChanged;
-@end
-
-extern "C" id MPMediaItemPropertyTitle;
-extern "C" id MPMediaItemPropertyAlbumTitle;
-extern "C" id MPMediaItemPropertyArtist;
-extern "C" id MPMediaItemPropertyArtwork;
-extern "C" id MPMediaItemPropertyPlaybackDuration;
-extern "C" id MPMediaItemPropertyAlbumTrackNumber;
-extern "C" id MPMediaItemPropertyReleaseDate;
-
-
-
-
-@interface HorizontalCollectionViewLayout : UICollectionViewLayout
-@property (nonatomic, assign) CGSize itemSize;
-@end
 
 @implementation CollectionTableAViewController
 @synthesize indexRow;
 - (void)updateData
 {
+	@try {
 	NSArray* Items = [(MPMediaItemCollection*)items[indexRow] items]?:@[];
 	
 	double Totalduration = 0;
@@ -176,12 +42,13 @@ extern "C" id MPMediaItemPropertyReleaseDate;
 	
 	((UINavigationBar*)self.navigationController.navigationBar).prompt = @" ";
 	
-	static __strong UILabel *label = [[UILabel alloc] initWithFrame:self.navigationController.navigationBar.bounds];
+	UILabel *label = [[UILabel alloc] initWithFrame:self.navigationController.navigationBar.bounds];
 	label.frame = self.navigationController.navigationBar.bounds;
 	label.backgroundColor = [UIColor whiteColor];
+	label.textColor = [UIColor blackColor];
 	label.numberOfLines = 4;
 	label.font = [UIFont boldSystemFontOfSize: 12.0f];
-	label.textAlignment = UITextAlignmentLeft;
+	label.textAlignment = NSTextAlignmentLeft;
 	label.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	label.translatesAutoresizingMaskIntoConstraints = YES;
 	
@@ -198,6 +65,9 @@ extern "C" id MPMediaItemPropertyReleaseDate;
 	label.text = [NSString stringWithFormat:@"  %@\n\n  %d songs, %@\n  %@", [song valueForProperty:MPMediaItemPropertyAlbumTitle], (int)[Items count], [dateComponentsFormatter stringFromTimeInterval:Totalduration], anoAlbum];
 	
 	[self.tableView reloadData];
+	
+	}@catch(NSException* e) {
+	}
 }
 - (id)initWithIndex:(int)arg1
 {
@@ -216,10 +86,13 @@ extern "C" id MPMediaItemPropertyReleaseDate;
 }
 - (NSInteger)tableView:(UITableView *)aTableView numberOfRowsInSection:(NSInteger)section 
 {
-	if(MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[indexRow]) {
-		if(NSArray* itms = [collectionSelected items]) {
-			return [itms count];
-		}		
+	@try {
+		if(MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[indexRow]) {
+			if(NSArray* itms = [collectionSelected items]) {
+				return [itms count];
+			}		
+		}
+	}@catch(NSException* e) {
 	}
     return 0;
 }
@@ -227,23 +100,21 @@ extern "C" id MPMediaItemPropertyReleaseDate;
 {
 	[aTableView deselectRowAtIndexPath:indexPath animated:YES];
 	
-	MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[indexRow];
-	MPMediaItem* song = [collectionSelected items][indexPath.row];
-	[MPcontroller setQueueWithItemCollection:collectionSelected];
-	[MPcontroller setNowPlayingItem:song];
-	[MPcontroller prepareToPlay];
-	[MPcontroller play];
+	playItem(1, indexRow, indexPath.row);
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-	MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[indexRow];
-	MPMediaItem* song = [collectionSelected items][indexPath.row];
-	
-   static __strong NSString* simpleTableIdentifier = @"SongCell";
+	NSString* simpleTableIdentifier = @"SongCell";
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:simpleTableIdentifier];
 	if (cell == nil) {
 		cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:simpleTableIdentifier];
     }
+	
+	@try {
+	MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[indexRow];
+	MPMediaItem* song = [collectionSelected items][indexPath.row];
+	
+	
 	
 	cell.accessoryView = nil;
 	cell.textLabel.text = nil;
@@ -252,7 +123,9 @@ extern "C" id MPMediaItemPropertyReleaseDate;
 	cell.textLabel.textAlignment = NSTextAlignmentLeft;
 	cell.imageView.image = nil;
 	[cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-	cell.backgroundColor = [UIColor whiteColor];	
+	cell.backgroundColor = [UIColor whiteColor];
+	cell.textLabel.textColor = [UIColor blackColor];
+	cell.detailTextLabel.textColor = [UIColor blackColor];
 	
 	cell.textLabel.font = [UIFont boldSystemFontOfSize: 12.0f];
 	cell.detailTextLabel.font = [UIFont boldSystemFontOfSize: 12.0f];
@@ -263,7 +136,8 @@ extern "C" id MPMediaItemPropertyReleaseDate;
 	NSDateComponentsFormatter *dateComponentsFormatter = [%c(NSDateComponentsFormatter) new];
 	dateComponentsFormatter.unitsStyle = NSDateComponentsFormatterUnitsStylePositional;
 	cell.detailTextLabel.text = [dateComponentsFormatter stringFromTimeInterval:duration];
-	
+	}@catch(NSException* e) {
+	}
 	return cell;
 }
 @end
@@ -342,18 +216,143 @@ extern "C" id MPMediaItemPropertyReleaseDate;
 
 static __strong UIImage* kNoArtWork = [[[UIImage alloc] initWithData:[NSData dataWithBytesNoCopy:(void *)NO_ART_BYTES length:NO_ART_LEN freeWhenDone:NO]] copy];
 
-static MPUTransportControlsView* getTransportButtons()
+
+@implementation PlayerButtonView
+@synthesize playView, pauseView, nextView, prevView, isPaused, prevImageView, pauseImageView, playImageView, nextImageView;
+- (UIImage *)inverseColor:(UIImage *)image
 {
-	static __strong MPUSystemMediaControlsViewController* MediaCV;
-	if(!MediaCV) {
-		MediaCV = [[MPUSystemMediaControlsViewController alloc] initWithStyle:0];
-		[MediaCV loadView];
-		
+    CIImage *coreImage = [CIImage imageWithCGImage:image.CGImage];
+    CIFilter *filter = [CIFilter filterWithName:@"CIColorInvert"];
+    [filter setValue:coreImage forKey:kCIInputImageKey];
+    CIImage *result = [filter valueForKey:kCIOutputImageKey];
+    return [UIImage imageWithCIImage:result];
+}
+- (id)initWithFrame:(CGRect)arg1
+{
+	self = [super initWithFrame:arg1];
+	
+	UIImage* kPlay = [[UIImage alloc] initWithData:[NSData dataWithBytesNoCopy:(void *)PLAY_BYTES length:PLAY_LEN freeWhenDone:NO]];
+	UIImage* kPause = [[UIImage alloc] initWithData:[NSData dataWithBytesNoCopy:(void *)PAUSE_BYTES length:PAUSE_LEN freeWhenDone:NO]];
+	UIImage* kNext = [[UIImage alloc] initWithData:[NSData dataWithBytesNoCopy:(void *)NEXT_BYTES length:NEXT_LEN freeWhenDone:NO]];
+	UIImage* kPrev = [[UIImage alloc] initWithData:[NSData dataWithBytesNoCopy:(void *)PREV_BYTES length:PREV_LEN freeWhenDone:NO]];
+	
+	kPlay = [self inverseColor:kPlay];
+	kPause = [self inverseColor:kPause];
+	kNext = [self inverseColor:kNext];
+	kPrev = [self inverseColor:kPrev];
+	
+	self.prevImageView = [[UIImageView alloc] initWithImage:kPrev];
+	self.pauseImageView = [[UIImageView alloc] initWithImage:kPause];
+	self.playImageView = [[UIImageView alloc] initWithImage:kPlay];
+	self.nextImageView = [[UIImageView alloc] initWithImage:kNext];
+	
+	self.prevImageView.contentMode = UIViewContentModeScaleAspectFill;
+	self.pauseImageView.contentMode = UIViewContentModeScaleAspectFill;
+	self.playImageView.contentMode = UIViewContentModeScaleAspectFill;
+	self.nextImageView.contentMode = UIViewContentModeScaleAspectFill;
+	
+	self.prevView = [[UIView alloc] init];
+	self.pauseView = [[UIView alloc] init];
+	self.playView = [[UIView alloc] init];
+	self.nextView = [[UIView alloc] init];
+	
+	[self.prevView addSubview:prevImageView];
+	[self.pauseView addSubview:pauseImageView];
+	[self.playView addSubview:playImageView];
+	[self.nextView addSubview:nextImageView];
+	
+	[self addSubview:self.prevView];
+	[self addSubview:self.pauseView];
+	[self addSubview:self.playView];
+	[self addSubview:self.nextView];
+	
+	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(playbackStateChanged) name:(__bridge id)kMRMediaRemoteNowPlayingInfoDidChangeNotification object:nil];
+	
+	
+	UITapGestureRecognizer *singleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleButtons:)];
+	singleTap.numberOfTapsRequired = 1;
+	
+	[self.prevView setUserInteractionEnabled:YES];
+	[self.pauseView setUserInteractionEnabled:YES];
+	[self.playView setUserInteractionEnabled:YES];
+	[self.nextView setUserInteractionEnabled:YES];
+	
+	[self setUserInteractionEnabled:YES];
+	[self addGestureRecognizer:singleTap];
+
+	return self;
+}
+- (void)playbackStateChanged
+{
+	MRMediaRemoteGetNowPlayingApplicationIsPlaying(dispatch_get_main_queue(), ^(Boolean isPlayingNow){
+		self.isPaused = isPlayingNow;
+		self.pauseView.hidden = !self.isPaused;
+		self.playView.hidden = self.isPaused;
+	});
+}
+- (void)handleButtons:(UITapGestureRecognizer*)gestureRecognizer
+{
+	if(gestureRecognizer) {
+		CGPoint loc = [gestureRecognizer locationInView:self];
+		if(CGRectContainsPoint(self.playView.frame, loc) || CGRectContainsPoint(self.pauseView.frame, loc)) {
+			MRMediaRemoteSendCommand(kMRTogglePlayPause, 0);
+		} else if(CGRectContainsPoint(self.nextView.frame, loc)) {
+			MRMediaRemoteSendCommand(kMRNextTrack, 0);
+		} else if(CGRectContainsPoint(self.prevView.frame, loc)) {
+			MRMediaRemoteSendCommand(kMRPreviousTrack, 0);
+		}
 	}
-	[MediaCV viewWillAppear:YES];
-	MPUSystemMediaControlsView* controV = (MPUSystemMediaControlsView*)object_getIvar(MediaCV, class_getInstanceVariable([MediaCV class], "_mediaControlsView"));
-	MPUTransportControlsView* retV = [controV transportControlsView];
-	retV.alpha = 1;
+}
+- (void)layoutSubviews
+{
+	[super layoutSubviews];
+	
+	[self setFrame:[self superview].bounds];
+	
+	[self playbackStateChanged];
+	
+	float centerSize = self.frame.size.width/2;
+	float buttonWidth = 42;
+	float spaceBetwen = buttonWidth*1.3f;
+	
+	CGPoint sizeBtVCen = CGPointMake(self.frame.size.height/2, self.frame.size.height/2);
+	[self.prevView setCenter:sizeBtVCen];
+	[self.pauseView setCenter:sizeBtVCen];
+	[self.playView setCenter:sizeBtVCen];
+	[self.nextView setCenter:sizeBtVCen];
+	
+	[self.prevView setFrame:CGRectMake(centerSize-(buttonWidth+spaceBetwen), self.prevView.frame.origin.y, buttonWidth, buttonWidth)];
+	[self.pauseView setFrame:CGRectMake(centerSize, self.pauseView.frame.origin.y, buttonWidth, buttonWidth)];
+	[self.playView setFrame:CGRectMake(centerSize, self.playView.frame.origin.y, buttonWidth, buttonWidth)];
+	[self.nextView setFrame:CGRectMake(centerSize+buttonWidth+spaceBetwen, self.nextView.frame.origin.y, buttonWidth, buttonWidth)];
+	
+	CGRect sizeBt = CGRectMake(0, 0, buttonWidth/2, buttonWidth/2);
+	[self.prevImageView setFrame:sizeBt];
+	[self.pauseImageView setFrame:sizeBt];
+	[self.playImageView setFrame:sizeBt];
+	[self.nextImageView setFrame:sizeBt];
+	
+	CGPoint sizeBtCen = CGPointMake(buttonWidth/2, buttonWidth/2);
+	[self.prevImageView setCenter:sizeBtCen];
+	[self.pauseImageView setCenter:sizeBtCen];
+	[self.playImageView setCenter:sizeBtCen];
+	[self.nextImageView setCenter:sizeBtCen];
+	
+	
+}
+@end
+
+
+static UIView* getTransportButtons()
+{
+	static UIView *retV;
+	if(!retV) {
+		retV = [UIView new];
+		PlayerButtonView *controls = [[PlayerButtonView alloc] initWithFrame:CGRectMake(0,0,0,0)];
+		controls.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+		[retV addSubview:controls];
+	}
+	[retV layoutSubviews];	
 	return retV;
 }
 
@@ -412,17 +411,25 @@ static MPUTransportControlsView* getTransportButtons()
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section
 {
-    return [items count];
+	@try {
+		return [items count];
+	}@catch(NSException* e) {
+	}
+	return 0;
 }
 - (UIImageView*)imageViewForIndexPath:(NSIndexPath *)indexPath withFrame:(CGRect)frame
 {
-	MPMediaItem* song = [(MPMediaItemCollection*)items[indexPath.row] representativeItem];
+	
 	UIImageView* imageV = [[UIImageView alloc] initWithFrame:frame];
-	imageV.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-	imageV.translatesAutoresizingMaskIntoConstraints = YES;
-	imageV.tag = 7856;
-	imageV.contentMode = UIViewContentModeScaleAspectFit;
-	imageV.image = [(MPMediaItem*)[song valueForProperty:MPMediaItemPropertyArtwork] imageWithSize:CGSizeMake(imageV.frame.size.width * 5, imageV.frame.size.width * 5)]?:kNoArtWork;
+	@try {
+		MPMediaItem* song = [(MPMediaItemCollection*)items[indexPath.row] representativeItem];
+		imageV.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+		imageV.translatesAutoresizingMaskIntoConstraints = YES;
+		imageV.tag = 7856;
+		imageV.contentMode = UIViewContentModeScaleAspectFit;
+		imageV.image = [(MPMediaItem*)[song valueForProperty:MPMediaItemPropertyArtwork] imageWithSize:CGSizeMake(imageV.frame.size.width * 5, imageV.frame.size.width * 5)]?:kNoArtWork;
+	}@catch(NSException* e) {
+	}
 	return imageV;
 }
 - (UICollectionViewCell *)collectionView:(UICollectionView *)acollectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath
@@ -464,7 +471,7 @@ static MPUTransportControlsView* getTransportButtons()
 	
 	
 	
-	MPUTransportControlsView* buttons = getTransportButtons();
+	UIView* buttons = getTransportButtons()?:[UIView new];
 	
 	buttons.frame = CGRectMake( 0, ((self.view.frame.size.height/2)-((self.view.frame.size.height/1.6)/1.6)) + (self.view.frame.size.height/1.6), (self.view.frame.size.width/2), 60);
 	buttons.tag = 96585;
@@ -474,7 +481,6 @@ static MPUTransportControlsView* getTransportButtons()
 	
 	((CollectionTableAViewController*)navCon.topViewController).indexRow = indexPath.row;
 	[(CollectionTableAViewController*)navCon.topViewController updateData];
-	//buttons.delegate = (CollectionTableAViewController*)navCon.topViewController;
 	
 	navCon.view.frame = CGRectMake( (self.view.frame.size.width/2), 0, (self.view.frame.size.width/2), self.view.frame.size.height);
 	navCon.view.alpha = 0;
@@ -558,10 +564,13 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 }
 - (NSInteger)tableView:(UITableView *)aTableView numberOfRowsInSection:(NSInteger)section 
 {
+	@try {
 	if(MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[collectionIndex]) {
 		if(NSArray* itms = [collectionSelected items]) {
 			return [itms count];
 		}		
+	}
+	}@catch(NSException* e) {
 	}
     return 0;
 }
@@ -569,23 +578,20 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 {
 	[aTableView deselectRowAtIndexPath:indexPath animated:YES];
 	
-	MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[collectionIndex];
-	MPMediaItem* song = [collectionSelected items][indexPath.row];
-	[MPcontroller setQueueWithItemCollection:collectionSelected];
-	[MPcontroller setNowPlayingItem:song];
-	[MPcontroller prepareToPlay];
-	[MPcontroller play];
+	playItem(1, collectionIndex, indexPath.row);
 }
 	
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-	MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[collectionIndex];
-	MPMediaItem* song = [collectionSelected items][indexPath.row];
-	
-    MDAudioPlayerTableViewCell *cell = (MDAudioPlayerTableViewCell *)[tableView dequeueReusableCellWithIdentifier:@"Cell"];
+	 MDAudioPlayerTableViewCell *cell = (MDAudioPlayerTableViewCell *)[tableView dequeueReusableCellWithIdentifier:@"Cell"];
 	if(cell == nil) {
 		cell = [[MDAudioPlayerTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"Cell"];
 	}
+	@try {
+	MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[collectionIndex];
+	MPMediaItem* song = [collectionSelected items][indexPath.row];
+	
+   
 	
 	cell.title = [song valueForProperty:MPMediaItemPropertyTitle];
 	cell.number = [NSString stringWithFormat:@"%@", [song valueForProperty:MPMediaItemPropertyAlbumTrackNumber]];
@@ -603,6 +609,9 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 	} else {
 		cell.isSelectedIndex = NO;
 	}*/
+	
+	}@catch(NSException* e) {
+	}
 	
 	return cell;
 }
@@ -633,26 +642,27 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 	[self.view addSubview:TapBarPlayer];
 	
 	titleName = [[UILabel alloc]initWithFrame:CGRectMake(0, TapBarPlayer.frame.size.height/8, TapBarPlayer.frame.size.width, TapBarPlayer.frame.size.height/4)];
-	titleName.textAlignment = UITextAlignmentCenter;
+	titleName.textAlignment = NSTextAlignmentCenter;
 	titleName.textColor = [UIColor whiteColor];
 	titleName.font = [UIFont systemFontOfSize:12];
 	[TapBarPlayer addSubview:titleName];
 	
 	artist = [[UILabel alloc]initWithFrame:CGRectMake(0, (TapBarPlayer.frame.size.height/2.8), TapBarPlayer.frame.size.width, TapBarPlayer.frame.size.height/4)];
-	artist.textAlignment = UITextAlignmentCenter;
+	artist.textAlignment = NSTextAlignmentCenter;
 	artist.textColor = [UIColor whiteColor];
 	artist.font = [UIFont systemFontOfSize:12];
 	[TapBarPlayer addSubview:artist];
 	
 	album = [[UILabel alloc]initWithFrame:CGRectMake(0, (TapBarPlayer.frame.size.height/1.8), TapBarPlayer.frame.size.width, TapBarPlayer.frame.size.height/4)];
-	album.textAlignment = UITextAlignmentCenter;
+	album.textAlignment = NSTextAlignmentCenter;
 	album.textColor = [UIColor whiteColor];
 	album.font = [UIFont systemFontOfSize:12];
 	[TapBarPlayer addSubview:album];
 	
-	MPUTransportControlsView* buttons = getTransportButtons();
+	UIView* buttons = getTransportButtons()?:[UIView new];
 	
-	buttons.frame = CGRectMake(15, 9, 200.0, 40.0);
+	buttons.frame = CGRectMake(30, 9, 260, 60.0);
+	
 	buttons.tag = 96585;
 	[TapBarPlayer addSubview:buttons];
 	
@@ -678,6 +688,8 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 }
 - (void)updateData
 {
+	@try {
+		
 	if([CoverflowM sharedInstanceExist]) {
 		if(UIView* superV = [[CoverflowM sharedInstance] springboardWindow]) {
 			superV.hidden = Enabled?NO:YES;
@@ -692,7 +704,7 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 				collectionScroll.view.hidden = NO;
 				carousel.hidden = YES;
 			} else {
-				carousel.type = styleEnabled-1;
+				carousel.type = (iCarouselType)(styleEnabled-1);
 				carousel.hidden = NO;
 				collectionScroll.view.hidden = YES;
 			}
@@ -703,6 +715,9 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 			artist.text = [song valueForProperty:MPMediaItemPropertyArtist];
 			album.text = [song valueForProperty:MPMediaItemPropertyAlbumTitle];
 		}
+		
+		}@catch(NSException* e) {
+	}
 }
 - (void)viewDidLoad
 {
@@ -722,6 +737,7 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 }
 - (void)carousel:(iCarousel *)carousels didSelectItemAtIndex:(NSInteger)index
 {
+	@try {
 	collectionIndex = index;
 	albumTableView.frame = [carousels currentItemView].bounds;
 	
@@ -735,6 +751,8 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 		[[carousels currentItemView] addSubview:albumTableView];
 	}
 	[UIView commitAnimations];
+	}@catch(NSException* e) {
+	}
 }
 
 - (void)carouselDidScroll:(iCarousel *)carousels
@@ -746,13 +764,19 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 
 - (NSInteger)numberOfItemsInCarousel:(iCarousel *)carousel
 {
+	@try {
     return [items count];
+	}@catch(NSException* e) {
+	}
+	return 0;
 }
 - (UIView *)carousel:(iCarousel *)carousels viewForItemAtIndex:(NSInteger)index reusingView:(UIView *)view
 {
-	
-	MPMediaItem* song = [(MPMediaItemCollection*)items[index] representativeItem];
 	float sizeArt = (self.view.frame.size.height/1.5);
+	UIView* viewR = [[ReflectionView alloc] initWithFrame:CGRectMake(0, 0, sizeArt, sizeArt)];
+	@try {
+	MPMediaItem* song = [(MPMediaItemCollection*)items[index] representativeItem];
+	
 	carousels.itemWidth = sizeArt;
 	UIView* artView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, sizeArt, sizeArt)];
 	artView.translatesAutoresizingMaskIntoConstraints = YES;
@@ -764,13 +788,15 @@ __strong static CoverflowMViewController* _sharedCoverflowMViewController;
 	imageV.translatesAutoresizingMaskIntoConstraints = YES;
 	imageV.image = [(MPMediaItem*)[song valueForProperty:MPMediaItemPropertyArtwork] imageWithSize:CGSizeMake(sizeArt * 5, sizeArt * 5)]?:kNoArtWork;
 	
-	UIView* viewR = [[ReflectionView alloc] initWithFrame:CGRectMake(0, 0, sizeArt, sizeArt)];
+	
 	((ReflectionView*)viewR).reflectionGap = 0;
 	[viewR addSubview:artView];
 	
 	if(view) {
 		view.frame = artView.bounds;
 	}	
+	}@catch(NSException* e) {
+	}
     return viewR;
 }
 - (CGFloat)carousel:(iCarousel *)carousel valueForOption:(iCarouselOption)option withDefault:(CGFloat)value
@@ -810,7 +836,7 @@ __strong static id _sharedObject;
 {
 	if (!_sharedObject) {
 		_sharedObject = [[self alloc] init];
-		CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback)&orientationChanged, CFSTR("com.apple.springboard.screenchanged"), NULL, 0);
+		CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback)&orientationChanged, CFSTR("com.apple.springboard.screenchanged"), NULL, (CFNotificationSuspensionBehavior)0);
 		CFNotificationCenterAddObserver(CFNotificationCenterGetLocalCenter(), NULL, (CFNotificationCallback)&orientationChanged, CFSTR("UIWindowDidRotateNotification"), NULL, CFNotificationSuspensionBehaviorCoalesce);
 	}
 	return _sharedObject;
@@ -877,21 +903,21 @@ __strong static id _sharedObject;
 	__block int yLoc;
 	#define DegreesToRadians(degrees) (degrees * M_PI / 180)
 	switch (orientation) {
-	case UIDeviceOrientationLandscapeRight: {			
+		case UIDeviceOrientationLandscapeRight: {			
 			isLandscape = YES;
 			yLoc = 0;
 			xLoc = 0;
 			newTransform = CGAffineTransformMakeRotation(-DegreesToRadians(90));
 			break;
 		}
-	case UIDeviceOrientationLandscapeLeft: {
+		case UIDeviceOrientationLandscapeLeft: {
 			isLandscape = YES;
 			yLoc = (kScreenH-controller.view.frame.size.width);
 			xLoc = (kScreenW-controller.view.frame.size.height);
 			newTransform = CGAffineTransformMakeRotation(DegreesToRadians(90));
 			break;
 		}
-	default: {
+		default: {
 			isLandscape = NO;
 			yLoc = 0;
 			xLoc = 0;
@@ -900,14 +926,15 @@ __strong static id _sharedObject;
 			break;
 		}
     }
-		springboardWindow.alpha = hideView?springboardWindow.alpha==0?0.0:1.0:0.0;
-		[springboardWindow setTransform:newTransform];
-		CGRect frame = springboardWindow.frame;
-		frame.origin.y = yLoc;
-		frame.origin.x = xLoc;
-		springboardWindow.frame = frame;
-		orientationOld = orientation;
-		
+	
+	springboardWindow.alpha = hideView?springboardWindow.alpha==0?0.0:1.0:0.0;
+	[springboardWindow setTransform:newTransform];
+	CGRect frame = springboardWindow.frame;
+	frame.origin.y = yLoc;
+	frame.origin.x = xLoc;
+	springboardWindow.frame = frame;
+	orientationOld = orientation;
+	
 	[UIView animateWithDuration:0.3f animations:^{
 		[[[UIApplication sharedApplication] statusBarWindow] setHidden:!hideView];
 		springboardWindow.alpha = hideView?0.0:1.0;
@@ -920,11 +947,19 @@ __strong static id _sharedObject;
 @end
 
 %group groupHooks
+
 %hook MusicApplicationDelegateGet
 - (BOOL)application:(id)arg1 willFinishLaunchingWithOptions:(id)arg2
 {
 	BOOL ret = %orig;
-	[(UIView *)[self window] addSubview:[[CoverflowM sharedInstance] springboardWindow]];
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+		@try {
+			MPMediaQuery* albums = [MPMediaQuery albumsQuery];
+			items = [albums _hasCollections]?[albums collections]:nil;
+			[(UIView *)[[UIApplication sharedApplication] keyWindow] addSubview:[[CoverflowM sharedInstance] springboardWindow]];
+		}@catch(NSException* e) {
+		}
+	});
 	return ret;
 }
 %end
@@ -940,13 +975,67 @@ __strong static id _sharedObject;
 	[CoverflowM notifyOrientationChange];
 }
 %end
-%end
+
+%end // END groupHooks
 
 
+@interface CoverflowMCenter : NSObject {
+	CPDistributedMessagingCenter * _messagingCenter;
+}
+@end
 
-
-
-
+@implementation CoverflowMCenter
++ (void)load
+{
+	[self sharedInstance];
+}
++ (instancetype)sharedInstance
+{
+	static dispatch_once_t once = 0;
+	__strong static id sharedInstance = nil;
+	dispatch_once(&once, ^{
+		sharedInstance = [self new];
+	});
+	return sharedInstance;
+}
+- (instancetype)init
+{
+	if ((self = [super init])) {
+		_messagingCenter = [CPDistributedMessagingCenter centerNamed:@"com.julioverne.coverflowm.center"];
+		rocketbootstrap_distributedmessagingcenter_apply(_messagingCenter);
+		[_messagingCenter runServerOnCurrentThread];
+		[_messagingCenter registerForMessageName:@"actionPlayer" target:self selector:@selector(handleMessageNamed:withUserInfo:)];
+	}
+	return self;
+}
+- (NSDictionary *)handleMessageNamed:(NSString *)name withUserInfo:(NSDictionary *)userInfo
+{
+	int action = [userInfo[@"action"]?:@(0) intValue];
+	MPMusicPlayerApplicationController* MPcontroller = [MPMusicPlayerController systemMusicPlayer];
+	MPMediaQuery* albums = [MPMediaQuery albumsQuery];
+	items = [albums _hasCollections]?[albums collections]:nil;
+	if(MPcontroller != nil) {
+		if(action==1) {
+			int collectionIndex = [userInfo[@"collectionIndex"]?:@(0) intValue];
+			int soundIndex = [userInfo[@"soundIndex"]?:@(0) intValue];
+			MPMediaItemCollection* collectionSelected = (MPMediaItemCollection*)items[collectionIndex];
+			MPMediaItem* song = [collectionSelected items][soundIndex];
+			[MPcontroller setQueueWithItemCollection:collectionSelected];
+			[MPcontroller setNowPlayingItem:song];
+			[MPcontroller prepareToPlay];
+			[MPcontroller play];
+		} else if(action==2) {
+			[MPcontroller pause];
+		} else if(action==3) {
+			[MPcontroller skipToNextItem];
+		} else if(action==4) {
+			[MPcontroller skipToPreviousItem];
+		}
+	}
+	
+	return @{};
+}
+@end
 
 
 static void settingsChangedCoverflowM(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
@@ -961,15 +1050,25 @@ static void settingsChangedCoverflowM(CFNotificationCenterRef center, void *obse
 		}
 	}
 }
+
+
 %ctor
 {
 	@autoreleasepool {
-		kScreenW = [[UIScreen mainScreen] bounds].size.width;
-		kScreenH = [[UIScreen mainScreen] bounds].size.height;
-		
-		CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, settingsChangedCoverflowM, CFSTR("com.julioverne.coverflowm/SettingsChanged"), NULL, CFNotificationSuspensionBehaviorCoalesce);
-		settingsChangedCoverflowM(NULL, NULL, NULL, NULL, NULL);
-		%init(groupHooks, MusicApplicationDelegateGet = objc_getClass("Music.ApplicationDelegate"));
+		if(%c(SpringBoard)==nil) {
+			kScreenW = [[UIScreen mainScreen] bounds].size.width;
+			kScreenH = [[UIScreen mainScreen] bounds].size.height;
+			
+			centerMusic = [CPDistributedMessagingCenter centerNamed:@"com.julioverne.coverflowm.center"];
+			rocketbootstrap_distributedmessagingcenter_apply(centerMusic);
+			
+			
+			CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, settingsChangedCoverflowM, CFSTR("com.julioverne.coverflowm/SettingsChanged"), NULL, CFNotificationSuspensionBehaviorCoalesce);
+			settingsChangedCoverflowM(NULL, NULL, NULL, NULL, NULL);
+			%init(groupHooks, MusicApplicationDelegateGet = objc_getClass("Music.ApplicationDelegate")?:objc_getClass("MusicApplication.ApplicationDelegate"));
+		} else {
+			[CoverflowMCenter load];
+		}
 	}
 }
 
